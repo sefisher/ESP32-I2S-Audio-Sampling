@@ -7,15 +7,17 @@
 #include "ADCSampler.h"
 
 //=================================================
-// WIFI
+// SETUP WIFI AND TRANSPORT MODE
 //=================================================
 
-//UNCOMMENT *ONE* OF THESE TO SET YOUR AUDIO TRANSPORT OPTION
+//1. Make sure your WiFi credentials are stored in "secrets.h"
+
+//2. UNCOMMENT *ONE* OF THESE TO SET YOUR AUDIO TRANSPORT OPTION
 #define USE_UDP   //1. clientless UDP capture using "nc -lu -p 12333 | aplay -f S16_LE -r 16000"
 //#define USE_TCP   //2. capture at TCP receiver using "nc -l -p 12333 | aplay -f S16_LE -r 16000"
 //#define USE_HTTP  //3. capture raw files at using "yarn start" on a node server 
                     //   (see https://github.com/atomic14/esp32_audio/tree/master/server/javascript)
-#define HOST "192.168.86.63"
+#define HOST "192.168.86.98"
 #define PORT 12333
 #ifdef USE_TCP
   WiFiClient client; //for TCP send
@@ -40,7 +42,7 @@
 #endif
 
 //================================================
-// ESP32 BOARD PINOUT FOR MIC
+// SETUP ESP32 BOARD PINOUT FOR MIC
 //================================================
 //Steve's Dev Board Setup:
 #define I2S_MIC_SERIAL_CLOCK GPIO_NUM_26

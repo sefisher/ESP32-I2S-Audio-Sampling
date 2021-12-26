@@ -18,3 +18,6 @@ Three modes currently supported, all over your local wifi:
 1. Uncomment or create one set of pin connections to match your board/mic setup in the "ESP32 BOARD PINOUT FOR MIC" section.
 1. Compile and upload your code onto your device.
 1. Run the receiving command on your listening computer and listen using headphones (to prevent feedback).
+
+# Work In Progress:
+Rhasspy uses the Hermes Protocol to communicate with remote microphones via MQTT.  See this [github repository for a Hermes Server/Player] (https://github.com/koenvervloesem/hermes-audio-server) that is written in Python.  It can run on a Raspberry Pi.  I'm working to stream via MQTT next.
