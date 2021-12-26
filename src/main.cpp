@@ -65,7 +65,7 @@
 
 #define NUM_BUF 2
 #define BUF_LEN 512
-#define SAMPLE_SIZE 8192
+#define SAMPLE_SIZE 256 //Rhasspy needs an audiofeed of 512 bytes+header per message (256 samples *2 bytes per value)
 
 //#define NUM_BUF 4
 //#define BUF_LEN 1024
@@ -77,6 +77,9 @@
 // Code Starts ===================
 ADCSampler *adcSampler = NULL;
 I2SSampler *i2sSampler = NULL;
+
+bool firstpacket = true;
+long packetCount = 0;
 
 // i2s config for using the internal ADC
 i2s_config_t adcI2SConfig = {
@@ -132,6 +135,12 @@ void adcWriterTask(void *param)
 {
   I2SSampler *sampler = (I2SSampler *)param;
   int16_t *samples = (int16_t *)malloc(sizeof(uint16_t) * SAMPLE_SIZE);
+  if(firstpacket){
+    Serial.print("Packet Size: ");
+    Serial.print(SAMPLE_SIZE * sizeof(uint16_t)); 
+    Serial.println(" bytes.");
+    firstpacket=false;
+  }
   if (!samples)
   {
     Serial.println("Failed to allocate memory for samples");
@@ -161,6 +170,12 @@ void i2sMemsWriterTask(void *param)
 {
   I2SSampler *sampler = (I2SSampler *)param;
   int16_t *samples = (int16_t *)malloc(sizeof(uint16_t) * SAMPLE_SIZE);
+  if(firstpacket){
+    Serial.print("Packet Size: ");
+    Serial.print(SAMPLE_SIZE * sizeof(uint16_t)); 
+    Serial.println(" bytes.");
+    firstpacket=false;
+  }
   if (!samples)
   {
     Serial.println("Failed to allocate memory for samples");
@@ -177,6 +192,10 @@ void i2sMemsWriterTask(void *param)
       client.write((const uint8_t *)samples, samples_read * sizeof(uint16_t)); 
     #endif 
     #ifdef USE_UDP
+      if(packetCount<20){
+        packetCount++;
+        Serial.println(samples_read);
+      }
       Udp.beginPacket(UDP_HOST, UDP_PORT);
       Udp.write((const uint8_t *)samples, samples_read * sizeof(uint16_t));
       Udp.endPacket();
@@ -260,3 +279,29 @@ void loop()
 {
   // nothing to do here - everything is taken care of by tasks
 }
+
+
+
+
+
+        // if (device->readAudio(data, device->readSize * device->width)) {
+        //   // only send audio if hotword_detection is HW_REMOTE.
+        //   //TODO when LOCAL is supported: check if hotword is detected and send audio as well in that case
+        //   if (config.hotword_detection == HW_REMOTE)
+        //   {
+        //     //Rhasspy needs an audiofeed of 512 bytes+header per message
+        //     //Some devices, like the Matrix Voice do 512 16 bit read in one mic read
+        //     //This is 1024 bytes, so two message are needed in that case
+        //     const int messageBytes = 512;
+        //     uint8_t payload[sizeof(header) + messageBytes];
+        //     const int message_count = sizeof(data) / messageBytes;
+        //     for (int i = 0; i < message_count; i++) {
+        //       memcpy(payload, &header, sizeof(header));
+        //       memcpy(&payload[sizeof(header)], &data[messageBytes * i], messageBytes);
+        //       audioServer.publish(audioFrameTopic.c_str(),(uint8_t *)payload, sizeof(payload));
+        //     }
+        //   }
+        // } else {
+        //   //Loop, because otherwise this causes timeouts
+        //   audioServer.loop();
+        // }
