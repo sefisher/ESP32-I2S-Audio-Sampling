@@ -1,10 +1,10 @@
-#include <Arduino.h>
-#include <WiFi.h>
-#include <WiFiUdp.h>
-#include <HTTPClient.h>
-#include "secrets.h"
-#include "I2SMEMSSampler.h"
-#include "ADCSampler.h"
+#include <Arduino.h>        //built-in to esp32 framework
+#include <WiFi.h>           //built-in to esp32 framework
+#include <WiFiUdp.h>        //built-in to esp32 framework
+#include <HTTPClient.h>     //built-in to esp32 framework
+#include "secrets.h"        //in "src" - .gitignored - contains wifi credentials
+#include "I2SMEMSSampler.h" //in "src"
+#include "ADCSampler.h"     //in "src"
 
 //=================================================
 // SETUP WIFI AND TRANSPORT MODE
@@ -58,24 +58,33 @@
 
 
 //================================================
+// SAMPLING SETTINGS
+//================================================
+#define SAMPLE_RATE 16000
+#define SAMPLE_FORMAT I2S_COMM_FORMAT_I2S_LSB //Signed Least Significant Bit (aka, Little Endian), S16_LE in aplay
 
+#define NUM_BUF 2
+#define BUF_LEN 512
+#define SAMPLE_SIZE 8192
+
+//#define NUM_BUF 4
+//#define BUF_LEN 1024
+//#define SAMPLE_SIZE 16384 //how many samples to read/send at once 
+
+//================================================
+
+
+// Code Starts ===================
 ADCSampler *adcSampler = NULL;
 I2SSampler *i2sSampler = NULL;
-
-#define SAMPLE_RATE 16000
-#define NUM_BUF 4
-#define BUF_LEN 1024
-
-// how many samples to read/send at once
-const int SAMPLE_SIZE = 16384; 
 
 // i2s config for using the internal ADC
 i2s_config_t adcI2SConfig = {
     .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX | I2S_MODE_ADC_BUILT_IN),
     .sample_rate = SAMPLE_RATE,
     .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
-    .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
-    .communication_format = I2S_COMM_FORMAT_I2S_LSB,
+    .channel_format = I2S_MIC_CHANNEL,
+    .communication_format = SAMPLE_FORMAT,
     .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
     .dma_buf_count = NUM_BUF,
     .dma_buf_len = BUF_LEN,
@@ -87,7 +96,7 @@ i2s_config_t adcI2SConfig = {
 i2s_config_t i2sMemsConfigLeftChannel = {
     .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
     .sample_rate = SAMPLE_RATE,
-    .bits_per_sample = I2S_BITS_PER_SAMPLE_32BIT,
+    .bits_per_sample = I2S_BITS_PER_SAMPLE_32BIT, //read as 32 bit but converted to 16 bit - deals with bug in ESP32
     .channel_format = I2S_MIC_CHANNEL,
     .communication_format = i2s_comm_format_t(I2S_COMM_FORMAT_I2S),
     .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
@@ -244,7 +253,7 @@ void setup()
   TaskHandle_t i2sMemsWriterTaskHandle;
   xTaskCreatePinnedToCore(i2sMemsWriterTask, "I2S Writer Task", 4096, i2sSampler, 1, &i2sMemsWriterTaskHandle, 1);
 
-  // // start sampling from i2s device
+  //start sampling from i2s device
 }
 
 void loop()
