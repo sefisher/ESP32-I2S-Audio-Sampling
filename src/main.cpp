@@ -11,12 +11,12 @@
 //=================================================
 
 //UNCOMMENT *ONE* OF THESE TO SET YOUR AUDIO TRANSPORT OPTION
-#define USE_UDP   //1. clientless UDP capture using "nc -lu -p 4444 | aplay -f S16_LE -r 16000"
-//#define USE_TCP   //2. capture at TCP receiver using "nc -l -p 4444 | aplay -f S16_LE -r 16000"
+#define USE_UDP   //1. clientless UDP capture using "nc -lu -p 12333 | aplay -f S16_LE -r 16000"
+//#define USE_TCP   //2. capture at TCP receiver using "nc -l -p 12333 | aplay -f S16_LE -r 16000"
 //#define USE_HTTP  //3. capture raw files at using "yarn start" on a node server 
                     //   (see https://github.com/atomic14/esp32_audio/tree/master/server/javascript)
-#define HOST "192.168.86.98"
-#define PORT 4444
+#define HOST "192.168.86.63"
+#define PORT 12333
 #ifdef USE_TCP
   WiFiClient client; //for TCP send
   #define TCP_HOST HOST
@@ -49,7 +49,7 @@
 #define I2S_MIC_CHANNEL I2S_CHANNEL_FMT_ONLY_LEFT
 
 //Brian's Custom Board Build:
-// #define I2S_MIC_CHANNEL I2S_CHANNEL_FMT_ONLY_RIGHT
+//#define I2S_MIC_CHANNEL I2S_CHANNEL_FMT_ONLY_RIGHT
 // #define I2S_MIC_SERIAL_CLOCK GPIO_NUM_26
 // #define I2S_MIC_LEFT_RIGHT_CLOCK GPIO_NUM_25  //THIS IS WS on INMP441
 // #define I2S_MIC_SERIAL_DATA GPIO_NUM_27
@@ -65,7 +65,7 @@ I2SSampler *i2sSampler = NULL;
 #define BUF_LEN 1024
 
 // how many samples to read/send at once
-const int SAMPLE_SIZE = 16384;
+const int SAMPLE_SIZE = 16384; 
 
 // i2s config for using the internal ADC
 i2s_config_t adcI2SConfig = {
@@ -95,7 +95,6 @@ i2s_config_t i2sMemsConfigLeftChannel = {
     .tx_desc_auto_clear = false,
     .fixed_mclk = 0};
 
-
 // i2s microphone pins
 i2s_pin_config_t i2sPins = {
     .bck_io_num = I2S_MIC_SERIAL_CLOCK,
@@ -116,7 +115,6 @@ void sendData(WiFiClient *wifiClient, HTTPClient *httpClient, const char *url, u
   digitalWrite(2, LOW);
   #endif
 }
-
 
 // Task to write samples from ADC to our server
 void adcWriterTask(void *param)
@@ -186,7 +184,7 @@ void setup()
     Serial.println("Using HTTP - run a HTTP server.");
   #endif 
   #ifdef USE_UDP
-    Serial.println("Using TCP - run a listener.");
+    Serial.println("Using UDP - run a listener.");
   #endif
   // launch WiFi
   Serial.printf("Connecting to WiFi");
