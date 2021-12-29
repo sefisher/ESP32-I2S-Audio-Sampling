@@ -1,2 +1,6 @@
 #define SSID "PUT YOUR SSID HERE"
 #define PASSWORD "PUT YOUR PASSWORD HERE"
+
+//the following are only used if HERMES MQTT is used for audio transport
+#define MQTTUSER "PUT YOUR MQTT SERVER USERNAME HERE"
+#define MQTTPASS "PUT YOUR MQTT SERVER PASSWORD HERE"
