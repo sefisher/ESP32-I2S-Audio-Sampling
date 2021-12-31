@@ -17,38 +17,38 @@ struct wavfile_header {
 };
 struct wavfile_header header;
 
-//TODO: figure out what is needed in topics below and delete the rest
+// //TODO: figure out what is needed in topics below and delete the rest
 
-std::string hotwordToggleOn = "hermes/hotword/toggleOn";
-std::string hotwordToggleOff = "hermes/hotword/toggleOff";
-std::string hotwordDetected = "hermes/hotword/default/detected";
+// std::string hotwordToggleOn = "hermes/hotword/toggleOn";
+// std::string hotwordToggleOff = "hermes/hotword/toggleOff";
+// std::string hotwordDetected = "hermes/hotword/default/detected";
 
-std::string asrToggleOn = "hermes/asr/toggleOn";
-std::string asrToggleOff = "hermes/asr/toggleOff";
-std::string asrStartListening = "hermes/asr/startListening";
-std::string asrStopListening = "hermes/asr/stopListening";
+// std::string asrToggleOn = "hermes/asr/toggleOn";
+// std::string asrToggleOff = "hermes/asr/toggleOff";
+// std::string asrStartListening = "hermes/asr/startListening";
+// std::string asrStopListening = "hermes/asr/stopListening";
 
-std::string audioTopic = SITEID + std::string("/audio");
+// std::string audioTopic = SITEID + std::string("/audio");
 
-// --> hermes/audioServer/<SITE_ID>/audioFrame
-// Replace <SITE_ID> with the site on which the sound frame was captured
-std::string audioFrameTopic = std::string("hermes/audioServer/") + SITEID + std::string("/audioFrame");
+// // --> hermes/audioServer/<SITE_ID>/audioFrame
+// // Replace <SITE_ID> with the site on which the sound frame was captured
+// std::string audioFrameTopic = std::string("hermes/audioServer/") + SITEID + std::string("/audioFrame");
 
-// --> hermes/audioServer/<SITE_ID>/playBytes/<REQUEST_ID>
-// Replace <SITE_ID> with the site on which to play the sound (e.g. default), and <REQUEST_ID> with an id to be passed back on hermes/audioServer/<SITE_ID>/playFinished (see below).
-std::string playBytesTopic = std::string("hermes/audioServer/") + SITEID + std::string("/playBytes/#");
-std::string playFinishedTopic = std::string("hermes/audioServer/") + SITEID + std::string("/playFinished");
+// // --> hermes/audioServer/<SITE_ID>/playBytes/<REQUEST_ID>
+// // Replace <SITE_ID> with the site on which to play the sound (e.g. default), and <REQUEST_ID> with an id to be passed back on hermes/audioServer/<SITE_ID>/playFinished (see below).
+// std::string playBytesTopic = std::string("hermes/audioServer/") + SITEID + std::string("/playBytes/#");
+// std::string playFinishedTopic = std::string("hermes/audioServer/") + SITEID + std::string("/playFinished");
 
-//TTS
-std::string sayTopic = "hermes/tts/say";
-std::string sayFinishedTopic = "hermes/tts/sayFinished";
+// //TTS
+// std::string sayTopic = "hermes/tts/say";
+// std::string sayFinishedTopic = "hermes/tts/sayFinished";
 
 void initHeader(int readSize, int width, int rate);
 void randIDgen(char* sessionStr, int len);
 
 //=====WAVE HEADER FORMATTING=================
 
-// THIS IS COMPLEX
+// THIS IS COMPLEX.....
 // see https://github.com/snipsco/hermes-protocol/blob/develop/hermes/src/ontology/audio_server.rs
 long message_size = 0;
 int queueDelay = 10;

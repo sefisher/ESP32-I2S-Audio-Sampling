@@ -2,8 +2,11 @@
 #include <WiFi.h>            //built-in to esp32 framework
 #include <WiFiUdp.h>         //built-in to esp32 framework
 #include <HTTPClient.h>      //built-in to esp32 framework
+
+//TODO: Choose a MQTT library and remove the others
 #include <AsyncMqttClient.h> // marvinroger/AsyncMqttClient@^0.9.0
 #include <PubSubClient.h>    // knolleary/PubSubClient@^2.8
+
 #include "I2SMEMSSampler.h"  //in "src"
 #include "ADCSampler.h"      //in "src"
 #include "secrets.h"         //in "src" - .gitignored - contains wifi and mqtt credentials
@@ -15,9 +18,9 @@
 //2. Uncomment *ONE* OF THE "#define USE_" STATEMENTS TO PICK AN AUDIO TRANSPORT OPTION
 //3. Enter the other related data for that type
 //#define USE_UDP   //1. clientless UDP capture using "nc -lu -p 12333 | aplay -f S16_LE -r 16000"
-//#define USE_TCP   //2. capture at TCP receiver using "nc -l -p 12333 | aplay -f S16_LE -r 16000"
+#define USE_TCP   //2. capture at TCP receiver using "nc -l -p 12333 | aplay -f S16_LE -r 16000"
 //#define USE_HTTP  //3. capture raw files at using "yarn start" on a node server (see below)
-#define USE_HERMES
+//#define USE_HERMES  //4. This posts audio and other commands to MQTT. See below.
 
 //===SETUP WIFI and TRANSPORT SPECIFICS===
 
@@ -41,7 +44,24 @@
 #endif
 
 #ifdef USE_HERMES
+
+  //What is working with HERMES:
+  // turn on RAWSAMPLETEST and PUBSUBMQTT below.  It will stream audio via MQTT and it seems like
+  // the Rhasspy server is catching it.
+  //You can run "mosquitto_sub -L mqtt://<username for mqtt server>:<pass for mqtt server>@192.168.86.102:1883/hermes/# -v" to see the MQTT traffic.
+  //If you modify the call to sendTestHermesAudioFrameBySamplingRawAudio to:
+  //    sendTestHermesAudioFrameBySamplingRawAudio(512, true);
+  // you can see the playBytes test running using "hermes-audio-player" - but it doesn't seem to actually work
+  
   #include "hermes.h"  //located in "src" it has functions/vars needed for HERMES MQTT
+  //Testing to find the right MQTT library
+  //Choose a MQTT library:
+  #define PUBSUBMQTT
+  //#define ASYNCMQTT
+  
+  //if you want to sample raw audio stored in audioFrameSessionData.h uncomment this:
+  #define RAWSAMPLETEST //does a sampling test from raw audio - ***requires you to also uncomment #define PUBSUBMQTT
+
   //Note: SITEID is defined as "default" in hermes.h
   //Note: MQTT USERNAME/PASSWORD is set in "secrets.h"
   #define MQTTHOST "192.168.86.102"
@@ -146,8 +166,9 @@ i2s_pin_config_t i2sPins = {
 #endif
 
 #ifdef USE_HERMES
+  
   WiFiClient client; //for comms over wifi
-  PubSubClient mqttAudioClient(client); 
+
   long lastReconnectAttempt = 0;
   
   long transmissionTimer = 0;
@@ -159,32 +180,58 @@ i2s_pin_config_t i2sPins = {
   char sessionID[30];
   char clientID[30];
 
+  //Define the selected mqtt client
+  #ifdef PUBSUBMQTT
+  PubSubClient mqttAudioClient(client);
+  #endif
+  #ifdef ASYNCMQTT
+  AsyncMqttClient asyncMQTTclient; 
+  #endif
+
   void setupHermes(){
     sessionID[0] = '\0';clientID[0] = '\0';
     randIDgen(clientID,30);
     Serial.print("Generated Client ID: ");Serial.println(clientID);
     
-    if(mqttAudioClient.setBufferSize(4500)){
-      Serial.println("Set the max buffer for MQTT messages to 4500.");
-    }else{
-      Serial.println("Failed to increase the MQTT message buffer (tried to make it 4500.)");
-    }
-
-    //mqttAudioClient is the MQTT server
-    mqttAudioClient.setServer(MQTTHOST, MQTTPORT);
-
-    // Set up MQTT server:
+  // Set up MQTT server:
     Serial.printf("Connecting MQTT: %s, %d\r\n", MQTTHOST, MQTTPORT);
+
+  #ifdef PUBSUBMQTT
+  //Initialize PUBSUBMQTT Variant======================
     mqttAudioClient.setServer(MQTTHOST, MQTTPORT);
     mqttAudioClient.connect(SITEID, MQTTUSER, MQTTPASS);
-
     Serial.print("Waiting for mqttAudioClient..");
     while(!mqttAudioClient.connected()){
       delay(100);
       Serial.print(".");
     }
-    Serial.printf("\r\nConnected. Site connected as: %s\r\n",SITEID);
+    Serial.printf("\r\nmqttAudioClient connected. Site connected as: %s\r\n",SITEID);
+    if(mqttAudioClient.setBufferSize(5500)){
+      Serial.println("Set the max buffer for MQTT messages to 5500.");
+    }else{
+      Serial.println("Failed to increase the MQTT message buffer (tried to make it 4500.)");
+    }
     mqttAudioClient.publish("hermes/audioServer/default/connected", clientID);
+  //=======================================
+  #endif
+
+  #ifdef ASYNCMQTT
+  //Initialize ASYNCMQTT Variant======================
+    asyncMQTTclient.setCredentials(MQTTUSER,MQTTPASS);
+    asyncMQTTclient.setServer(MQTTHOST,MQTTPORT);
+    asyncMQTTclient.connect();
+
+    Serial.print("Waiting for asyncMQTTclient..");
+    while(!asyncMQTTclient.connected()){
+      delay(100);
+      Serial.print(".");
+    }
+      const char topic[] = "hermes/audioServer/default/connected";
+    Serial.printf("\r\nasyncMQTTclient connected. Site connected as: %s\r\n",SITEID);
+    asyncMQTTclient.publish(topic, 0, false, clientID);
+  //=======================================
+  #endif
+
     lastReconnectAttempt = 0;
 
     //set up the wave format header
@@ -204,17 +251,28 @@ i2s_pin_config_t i2sPins = {
     3)  Publish the streaming audio for 3 seconds at a time.
     */
   }
+
   //reconnect to HERMES server if disconnected
   bool reconnect() {
+  #ifdef PUBSUBMQTT
     if (mqttAudioClient.connect(SITEID, MQTTUSER, MQTTPASS)) {
       Serial.println(" mqttAudioClient-->reconnected.");
-      // Once connected, publish an announcement...
       mqttAudioClient.publish("hermes/audioServer/default/connected","Hello - reconnected.");
-      // ... and resubscribe
-      //mqttAudioClient.subscribe("inTopic");
     }
     return mqttAudioClient.connected();
+  #endif
+  #ifdef ASYNCMQTT
+    asyncMQTTclient.connect();
+    if (asyncMQTTclient.connected()) {
+      Serial.println(" asyncMQTTclient-->reconnected.");
+      // Once connected, publish an announcement...
+      char topic[] = "hermes/audioServer/default/connected";
+      asyncMQTTclient.publish(topic, 0, false,"Hello - reconnected.");
+    }
+    return asyncMQTTclient.connected();
+  #endif
   }
+ 
   //generate session ID for hermes
   void randIDgen(char* sessionStr, int len){
    for(int i=0;i<(len-1);i++){
@@ -233,8 +291,13 @@ i2s_pin_config_t i2sPins = {
     transmissionTimer = millis();
     randIDgen(sessionID,30);
     String startHeader = String("{\"siteId\": \"default\",\"sessionId\": \"") + String(sessionID) + String("\",\"lang\": null,\"stopOnSilence\": false,\"sendAudioCaptured\": true,\"wakewordId\": null,\"intentFilter\": null}");
-    mqttAudioClient.publish("hermes/asr/startListening", startHeader.c_str(),sizeof(startHeader.c_str()));
-
+    const char topic[] = "hermes/asr/startListening";
+    #ifdef PUBSUBMQTT
+    mqttAudioClient.publish(topic, startHeader.c_str(),sizeof(startHeader.c_str()));
+    #endif
+    #ifdef ASYNCMQTT
+    asyncMQTTclient.publish(topic, 0, false, startHeader.c_str());
+    #endif
     /*TODO - 
       hermes/asr/startListening - startHeader;
       [send all]->hermes/audioServer/default/<sessionID>/audioSessionFrame - RIFF message; 
@@ -246,7 +309,13 @@ i2s_pin_config_t i2sPins = {
     transmitting=false;
     lastTransmissionCompleted = millis();
     String endHeader = String("{\"siteId\": \"default\",\"sessionId\": \"") + String(sessionID) + String("\"}");
-    mqttAudioClient.publish("hermes/asr/stopListening", endHeader.c_str(),sizeof(endHeader.c_str()));
+    const char topic[] = "hermes/asr/stopListening";
+    #ifdef PUBSUBMQTT
+    mqttAudioClient.publish(topic, endHeader.c_str(),sizeof(endHeader.c_str()));
+    #endif
+    #ifdef ASYNCMQTT
+    asyncMQTTclient.publish(topic, 0, false, endHeader.c_str());
+    #endif
     Serial.println("Completed hermes-mqtt audio transmission.");
   }
 
@@ -257,17 +326,20 @@ i2s_pin_config_t i2sPins = {
     //That would be 1024 bytes, so two message are needed in that case.
     //For our setup this is (readsize=256) * (width=2) ==> 512; so 1 message 
     //is good enough.
-    const int messageBytes = samples_read*2 + sizeof(header);
-    unsigned char msg[messageBytes] = "";
+
     //const int message_count = sizeof(samples) / messageBytes;
     //for (int i = 0; i < message_count; i++) {
     String audioFrameHeader = String("hermes/audioServer/default/") + String(sessionID) + String("/audioSessionFrame");
-      
+    
+    #ifdef PUBSUBMQTT  
+    const int messageBytes = samples_read*2 + sizeof(header);
+    unsigned char msg[messageBytes] = "";
+    Serial.println("Trying PUBSUBMQTT audioFrameTransmission:");
+    Serial.println(audioFrameHeader);
+    //Serial.println(msg);
     memcpy(&msg, &header, sizeof(header));
     memcpy(&msg[sizeof(header)], &samples[0], 512);
     mqttAudioClient.publish(audioFrameHeader.c_str(),msg, sizeof(msg));
-      //snprintf (msg, messageBytes, "%ld", value);
-      
     if(packetCount<1){
       packetCount++;
       Serial.print("AudioFrameTopic: "); Serial.println(audioFrameHeader.c_str());
@@ -291,103 +363,232 @@ i2s_pin_config_t i2sPins = {
       printHexArray((uint8_t *)&msg,messageBytes);
       Serial.println("\r\n---------------------------");
     }
+    #endif
+    
+    #ifdef ASYNCMQTT
+    Serial.println("Trying ASYNCMQTT audioFrameTransmission:");
+    Serial.println(audioFrameHeader);
+    Serial.println((const char *) samples);
+   
+    asyncMQTTclient.publish(audioFrameHeader.c_str(), 0, false, (const char *) samples);
+    #endif
+
+      //snprintf (msg, messageBytes, "%ld", value);
+      
+    
   }
 
-  void sendTestHermesAudioFrame(){
-    if(testcount<2){
-      testcount++;
-      //unsigned char msg[4140];
-      String audioFrameHeader = String("hermes/audioServer/default/") + String(sessionID) + String("/audioSessionFrame");
-      
-      switch(testcount){
-        case 1:
-            Serial.print("RIFF1 size: ");Serial.println(sizeof(RIFF1));
-            mqttAudioClient.publish(audioFrameHeader.c_str(),(const uint8_t *)RIFF1, (uint8_t)sizeof(RIFF1));
-        break;
-        case 2:
-            //memcpy(&msg, &RIFF2, sizeof(RIFF2));
-            mqttAudioClient.publish(audioFrameHeader.c_str(),(const uint8_t *)RIFF2, (uint8_t)sizeof(RIFF2));
-        break;
-        case 3:
-        break;
-        case 4:
-        break;
-        case 5:
-        break;
-        case 6:
-        break;
-        case 7:
-        break;
-        case 8:
-        break;
-        case 9:
-        break;
-        case 10:
-        break;
-        case 11:
-        break;
+  #ifdef RAWSAMPLETEST
+  #define MAXCHUNKSIZE 5500
+  //THIS FUNCTION TESTS SAMPLING AND SENDING RAW AUDIO IN CHUNKS
+  //**THIS FUNCTION IS SET UP FOR PUBSUBCLIENT ONLY
+
+  //set playBytes to true to stream for just testing audio being streamed to a hermes_audio_player.
+  //--->"hermes/audioServer/default/playBytes/
+  //set playBytes to false for sending chunks in audioFrameSession for processing by Rhasspy
+  //--->"hermes/audioServer/default/" + sessionID + "/audioSessionFrame"
+  // If use8bit==true this processes the unsigned int, 8bit rawData[] data set, if it is processed 
+  // as signed int 16bit data.
+  void sendTestHermesAudioFrameBySamplingRawAudio(int waveChunkSize, bool playBytes = false){
+    #ifdef USE8BIT 
+    bool use8bit = true;
+    #else
+    bool use8bit = false;
+    #endif
+    // Note on data formatting: Whether using 8 bits or 16 bits in the audio stream, 
+    // we are just going to send the data around here in 8 bit chunks.
+    // (Reminder: 0xFF is 2 hexidecimal digits which is 8 bits or 1 byte. 
+    // So these arrays are an array of single bytes and uint8_t is also a 
+    // single byte; and uint_8_t is identical to unsigned char in ESP32).)
+    
+    //audioChunk[] this is for pulling from rawData[] with size 45294 for 16bit or 22647 for 8bit; 44 is for header
+    Serial.println("Steps 1.");
+    uint8_t audioChunk[MAXCHUNKSIZE+44]; 
+    int totalLength,chunkCount,numberOfChunks;
+    String audioFrameTopic;
+
+    /* 
+    From turnoffthedesklamp-downsample-U8b-Left.wav
+
+    waveheader8[4-7] needs to be updated to be (uint32_t)(waveChunkSize*sizeof(uint8_t)+36)
+    waveheader8[40-43] needs to be updated to be (uint32_t)(waveChunkSize*sizeof(uint8_t))
+    */
+     uint8_t waveheader8[44] = {
+      0x52, 0x49, 0x46, 0x46, //R I F F
+      0x9B, 0x58, 0x00, 0x00, //22683 = Length of "file" (32 bit integer) excluding first 8 header bytes (22647 + 44(header) - 8(first 8) for full array)
+      0x57, 0x41, 0x56, 0x45, //W A V E
+      0x66, 0x6D, 0x74, 0x20, //fmt_
+      0x10, 0x00, 0x00, 0x00, //16 - number of bytes in above format data packet
+      0x01, 0x00, //PCM format (2 byte int)
+      0x01, 0x00, //1 channel
+      0x80, 0x3E, 0x00, 0x00, //16000 (Sample Rate - 32 bit integer). 
+      0x80, 0x3E, 0x00, 0x00, //16000 (Bit Rate = (Sample Rate * BitsPerSample * Channels) / 8).
+      0x01, 0x00, //bitsPerSample*Channels --> 1 - 8 bit mono; 2 - 8 bit stereo/16 bit mono; 
+      0x08, 0x00, //8 Bits per sample 
+      0x64, 0x61, 0x74, 0x61, //d a t a
+      0x77, 0x58, 0x00, 0x00  //22647 (Size of the data section - 32 bit integer)
+    };
+
+    /* 
+    From turnoffthedesklamp-downsample-S16b-Left.wav 
+    */
+    uint8_t waveheader16[44] = {
+      0x52, 0x49, 0x46, 0x46, //R I F F
+      0x12, 0xB1, 0x00, 0x00, //45330 = Length of "file" (32 bit integer) excluding first 8 header bytes (45294 + 44(header) - 8(first 8) for full array)
+      0x57, 0x41, 0x56, 0x45, //W A V E
+      0x66, 0x6D, 0x74, 0x20, //fmt_ 
+      0x10, 0x00, 0x00, 0x00, //16 - number of bytes in above format data packet
+      0x01, 0x00, //PCM format (2 byte int)
+      0x01, 0x00, //1 channel
+      0x80, 0x3E, 0x00, 0x00, //16000 (Sample Rate - 32 bit integer).  
+      0x00, 0x7D, 0x00, 0x00, //32000 (Bit Rate = (Sample Rate * BitsPerSample * Channels) / 8).
+      0x02, 0x00, //bitsPerSample*Channels --> 1 - 8 bit mono; 2 - 8 bit stereo/16 bit mono; 
+      0x10, 0x00, //16 Bits per sample 
+      0x64, 0x61, 0x74, 0x61, //d a t a
+      0xEE, 0xB0, 0x00, 0x00  //45294 (Size of the data section - 32 bit integer)
+    };
+    
+    Serial.print("2.");
+    //Prepare header
+    unsigned long x; //part size to convert to byte array
+    uint8_t *headerArrayPtr;
+    uint8_t *currentPtr;
+
+    if(use8bit){
+      headerArrayPtr = waveheader8;
+    }else{
+      headerArrayPtr = waveheader16;
+    }
+    //waveheaderXX[4-7] needs to be updated to be (uint32_t)((waveChunkSize*sizeof(uint8_t)))/sizeof(uint16_t) + 36);
+    x=( (waveChunkSize*sizeof(uint8_t)) / sizeof(uint16_t) + 36);
+    headerArrayPtr[7] = static_cast<unsigned char>((x & 0xFF000000) >> 24);
+    headerArrayPtr[6] = static_cast<unsigned char>((x & 0x00FF0000) >> 16);
+    headerArrayPtr[5] = static_cast<unsigned char>((x & 0x0000FF00) >> 8); 
+    headerArrayPtr[4] = static_cast<unsigned char>(x & 0x000000FF); 
+    Serial.println("\r\nFile size calc:");
+    printHexArray(&headerArrayPtr[4],4); 
+    
+    //waveheaderXX[40-43] needs to be updated to be (uint32_t)((waveChunkSize*sizeof(uint8_t))/sizeof(uint16_t))
+    x=(x-36);
+    headerArrayPtr[43] = static_cast<unsigned char>((x & 0xFF000000) >> 24);
+    headerArrayPtr[42] = static_cast<unsigned char>((x & 0x00FF0000) >> 16);  
+    headerArrayPtr[41] = static_cast<unsigned char>((x & 0x0000FF00) >> 8);   
+    headerArrayPtr[40] = static_cast<unsigned char>(x & 0x000000FF); 
+    Serial.println("\r\nData size calc:");
+    printHexArray(&headerArrayPtr[40],4);
+    
+    Serial.println("\r\nPrinting Wave Header:");
+    printHexArray(headerArrayPtr,44);
+
+    Serial.printf("\r\nPreps completed. File length calc: %lu (%04x). Data section length calc: %lu (%04x).\r\n",x+36,x+36,x,x);
+    if(use8bit) {totalLength = 22647;}else{totalLength = 45294;}
+    numberOfChunks = totalLength/waveChunkSize;
+    
+    Serial.printf("\r\n========sendTestHermesAudioFrameBySamplingRawAudio==========\r\n");
+    Serial.printf("USE8BIT=%d; totalLength=%d;\r\nMAXCHUNKSIZE=%d; waveChunkSize=%d; numberOfChunks=%d\r\n", use8bit,totalLength,MAXCHUNKSIZE,waveChunkSize,numberOfChunks);
+
+    //Note: last chunk (e.g., chunkCount==numberOfChunks) will have any remainder that didn't fit
+    //TODO - deal with the last chunk
+    //for(chunkCount=0;chunkCount <= numberOfChunks;chunkCount++){}
+    
+    for(chunkCount=0;chunkCount < numberOfChunks;chunkCount++){
+      //get a chunk
+      Serial.printf("Chunk number: %d of %d. Begins with:\r\n",chunkCount,numberOfChunks);
+      // std::copy(headerArrayPtr, headerArrayPtr + 44, audioChunk);
+      // std::copy(rawData + chunkCount*waveChunkSize, rawData + chunkCount*(waveChunkSize+1) , audioChunk + 44);
+      currentPtr = &rawData[chunkCount*waveChunkSize];
+      memcpy(&audioChunk[0], &headerArrayPtr[0], 44*sizeof(uint8_t));
+      memcpy(&audioChunk[44], currentPtr, waveChunkSize*sizeof(uint8_t));
+      printHexArray(&audioChunk[0],12);
+      Serial.printf("Audio Data Begins at %d with:\r\n", chunkCount*waveChunkSize);
+      printHexArray(&audioChunk[44],8);
+
+      //start off
+      if(chunkCount==0){ //if first chunk, kick things off for audioSessionFrame mode
+        if(playBytes){
+          randIDgen(sessionID,30);
+        }else{
+          startHermesTransmission();
+        }
       }
 
-     //mqttAudioClient.publish(audioFrameHeader.c_str(),msg, sizeof(msg));
-        //snprintf (msg, messageBytes, "%ld", value);
+      //Set MQTT topic
+      if(playBytes){
         
-      if(testcount<2){
-        packetCount++;
-        Serial.print("AudioFrameTopic: "); Serial.println(audioFrameHeader.c_str());
-        Serial.print("; Total Message Size: "); Serial.print(sizeof(RIFF1));
-        Serial.println("\r\n---------------------------");
-        Serial.println("Printing Part of Message");
-        Serial.println("---------------------------");
-        printHexArray((uint8_t *)&RIFF1, 96);
-        Serial.println("\r\n---------------------------");
+        //For streaming test===============
+        //audioFrameTopic = String("hermes/audioServer/default/playBytesStreaming/")+String(sessionID)+String("/")+String(chunkCount);
+        //if(chunkCount==numberOfChunks-1){audioFrameTopic = audioFrameTopic + String("/1");}else{audioFrameTopic = audioFrameTopic + String("/0");}
+        //=================================
+
+        //For single playBytes test========
+        audioFrameTopic = String("hermes/audioServer/default/playBytes/")+String(sessionID);
+        //=================================
+      }else{
+        audioFrameTopic = String("hermes/audioServer/default/") + String(sessionID) + String("/audioSessionFrame");
+      }
+      
+      //Publish the message binary
+      mqttAudioClient.publish(audioFrameTopic.c_str(),(const uint8_t *)audioChunk, (unsigned int)(sizeof(uint8_t)*(44+waveChunkSize)));
+
+      //Send message that we are done
+      if(chunkCount==numberOfChunks-1){
+        if(playBytes){
+          // THIS SEEMS TO NOT BE NEEDED:
+          // audioFrameTopic = String("{\"id\": \"")+String(sessionID)+String("\", \"sessionId\": \"")+String(sessionID)+String("\"}");
+          // mqttAudioClient.publish("hermes/audioServer/default/playFinished",audioFrameTopic.c_str());
+          //============================
+        }else {
+          endHermesTransmission();
+        }
       }
     }
   }
+  #endif //RAWSAMPLETEST
+  
+  //THIS TESTS SENDING THE RIFFS IN THE 4096 BIT CHUNKS
+  void sendTestHermesChunkedAudioFrame(){
+    String audioFrameHeader;
+    
+    if(testcount<11){
+      audioFrameHeader = String("hermes/audioServer/default/") + String(sessionID) + String("/audioSessionFrame");
+      Serial.println((const char *) RIFF1);mqttAudioClient.publish(audioFrameHeader.c_str(),(const uint8_t *)RIFF1, (uint16_t)sizeof(RIFF1));
 
-// void sendTestHermesAudioFrame2(){
-//     if(testcount<1){
-//       testcount++;
-//       //unsigned char msg[4140];
-//       String audioFrameHeader = String("hermes/audioServer/default/") + String(sessionID) + String("/audioSessionFrame");
-      
-//       //Rhasspy needs an audiofeed of 512 bytes+header per message
-//       //Some devices, like the Matrix Voice do 512 16 bit read in one mic read
-//       //This is 1024 bytes, so two message are needed in that case
-//       const int messageBytes = 512;
-//       uint8_t payload[sizeof(header) + messageBytes];
-//       const int message_count = sizeof(data) / messageBytes;
-//       for (int i = 0; i < message_count; i++) {
-//         memcpy(payload, &header, sizeof(header));
-//         memcpy(&payload[sizeof(header)], &data[messageBytes * i], messageBytes);
-//         audioServer.publish(audioFrameTopic.c_str(),(uint8_t *)payload, sizeof(payload));
-//       }
-//       switch(testcount){
-//         case 1:
-//             Serial.print("RIFF1 size: ");Serial.println(sizeof(RIFF1));
-//             mqttAudioClient.publish(audioFrameHeader.c_str(),(const uint8_t *)RIFF1, (uint8_t)sizeof(RIFF1));
-//         break;
-//         case 2:
-//             //memcpy(&msg, &RIFF2, sizeof(RIFF2));
-//             mqttAudioClient.publish(audioFrameHeader.c_str(),(const uint8_t *)RIFF2, (uint8_t)sizeof(RIFF2));
-//         break;
-//       }
-
-//      //mqttAudioClient.publish(audioFrameHeader.c_str(),msg, sizeof(msg));
-//         //snprintf (msg, messageBytes, "%ld", value);
-        
-//       if(testcount<2){
-//         packetCount++;
-//         Serial.print("AudioFrameTopic: "); Serial.println(audioFrameHeader.c_str());
-//         Serial.print("; Total Message Size: "); Serial.print(sizeof(RIFF1));
-//         Serial.println("\r\n---------------------------");
-//         Serial.println("Printing Part of Message");
-//         Serial.println("---------------------------");
-//         printHexArray((uint8_t *)&RIFF1, 96);
-//         Serial.println("\r\n---------------------------");
-//       }
-//     }
-//   }
-
+        Serial.print("RIFF size: ");Serial.println(sizeof(RIFF2));
+        #ifdef PUBSUBMQTT
+            Serial.println("Trying PUBSUBMQTT audioFrameTransmission:");
+            Serial.println(audioFrameHeader);
+            switch(testcount){
+              case 0:
+              Serial.println((const char *) RIFF1);mqttAudioClient.publish(audioFrameHeader.c_str(),(const uint8_t *)RIFF1, (uint16_t)sizeof(RIFF1));
+              Serial.print("AudioFrameTopic: "); Serial.println(audioFrameHeader.c_str());
+              Serial.print("Total Message Size: "); Serial.print(sizeof(RIFF2));
+              Serial.println("\r\n---------------------------");
+              Serial.println("Printing Part of Message");
+              Serial.println("---------------------------");
+              printHexArray((uint8_t *)&RIFF2, 96);
+              Serial.println("\r\n---------------------------");              
+              break;
+              case 1:Serial.println((const char *) RIFF2);mqttAudioClient.publish(audioFrameHeader.c_str(),(const uint8_t *)RIFF2, (uint16_t)sizeof(RIFF2));break;
+              case 2:Serial.println((const char *) RIFF3);mqttAudioClient.publish(audioFrameHeader.c_str(),(const uint8_t *)RIFF3, (uint16_t)sizeof(RIFF3));break;
+              case 3:Serial.println((const char *) RIFF4);mqttAudioClient.publish(audioFrameHeader.c_str(),(const uint8_t *)RIFF4, (uint16_t)sizeof(RIFF4));break;
+              case 4:Serial.println((const char *) RIFF5);mqttAudioClient.publish(audioFrameHeader.c_str(),(const uint8_t *)RIFF5, (uint16_t)sizeof(RIFF5));break;
+              case 5:Serial.println((const char *) RIFF6);mqttAudioClient.publish(audioFrameHeader.c_str(),(const uint8_t *)RIFF6, (uint16_t)sizeof(RIFF6));break;
+              case 6:Serial.println((const char *) RIFF7);mqttAudioClient.publish(audioFrameHeader.c_str(),(const uint8_t *)RIFF7, (uint16_t)sizeof(RIFF7));break;
+              case 7:Serial.println((const char *) RIFF8);mqttAudioClient.publish(audioFrameHeader.c_str(),(const uint8_t *)RIFF8, (uint16_t)sizeof(RIFF8));break;
+              case 8:Serial.println((const char *) RIFF9);mqttAudioClient.publish(audioFrameHeader.c_str(),(const uint8_t *)RIFF9, (uint16_t)sizeof(RIFF9));break;
+              case 9:Serial.println((const char *) RIFF10);mqttAudioClient.publish(audioFrameHeader.c_str(),(const uint8_t *)RIFF10, (uint16_t)sizeof(RIFF10));break;
+              case 10:Serial.println((const char *) RIFF11);mqttAudioClient.publish(audioFrameHeader.c_str(),(const uint8_t *)RIFF11, (uint16_t)sizeof(RIFF11));break;
+            }
+        #endif
+        #ifdef ASYNCMQTT
+            Serial.println("Trying ASYNCMQTT audioFrameTransmission:");
+            Serial.println(audioFrameHeader);
+            Serial.println((const char *)RIFF2);
+            asyncMQTTclient.publish(audioFrameHeader.c_str(),0,false, (void *) RIFF2, (uint16_t)sizeof(RIFF2));
+        #endif
+        testcount++;
+      }
+    }
 
   //little utilty for printing bytes 
   void printHex(uint8_t num) {
@@ -395,7 +596,7 @@ i2s_pin_config_t i2sPins = {
     sprintf(hexCar, "%02X", num);
     Serial.print(hexCar);
   }
-  //utility for printing byte arrays in 32 byte rows
+  //utility for printing byte arrays in 32 bit (4 byte, or 8 hex characters) rows
   void printHexArray(uint8_t* num, int count){
     for(int i=0;i<count;i++){
       printHex(num[i]);
@@ -410,6 +611,7 @@ i2s_pin_config_t i2sPins = {
 #endif 
 
 // Task to write samples from ADC to our server
+// I'm using I2S so I haven't tested this function
 void adcWriterTask(void *param)
 {
   I2SSampler *sampler = (I2SSampler *)param;
@@ -442,7 +644,7 @@ void adcWriterTask(void *param)
       Udp.endPacket();
     #endif
     #ifdef USE_HERMES
-      //TODO - copy from I2S to here when working.
+      //TODO - copy from i2sMemsWriterTask to here when that working.
     #endif
   }
 }
@@ -474,20 +676,32 @@ void i2sMemsWriterTask(void *param)
       client.write((const uint8_t *)samples, samples_read * sizeof(uint16_t)); 
     #endif 
     #ifdef USE_UDP
-
       Udp.beginPacket(UDP_HOST, UDP_PORT);
       Udp.write((const uint8_t *)samples, samples_read * sizeof(uint16_t));
       Udp.endPacket();
     #endif
     #ifdef USE_HERMES
+      #ifdef PUBSUBMQTT
        if(mqttAudioClient.connected()){
+      #endif
+      #ifdef ASYNCMQTT
+       if(asyncMQTTclient.connected()){
+      #endif
         if(samples_read&&transmitting){
+            
+            //TODO - the tests aren'tr working ; need to fix and then put in
+            // in the streaming.
+            
             //sendHermesAudioFrame(samples_read,samples);
-            sendTestHermesAudioFrame();
-        } else {
+            //sendTestHermesChunkedAudioFrame();
+            //sendTestHermesAudioFrameBySamplingRawAudio(512);
+        } 
+        #ifdef PUBSUBMQTT
+        else {
           //Loop, because otherwise this causes timeouts
           mqttAudioClient.loop();
-        } //if samples_read
+        } 
+        #endif
       } else {
         long now = millis();
         Serial.println("mqttAudioClient-->disconnected.");
@@ -582,14 +796,22 @@ void loop()
 {
   // nothing to do here - everything is taken care of by tasks
   #ifdef USE_HERMES
-    long now = millis();
-    if(!completedAudioTransmission && !transmitting){
-      startHermesTransmission();
-    }else if(transmitting){
-      //Serial.print(".");
-      if(now-transmissionTimer > 500){
-        endHermesTransmission();
+    #ifndef RAWSAMPLETEST
+      long now = millis();
+      if(!completedAudioTransmission && !transmitting){
+        startHermesTransmission();
+      }else if(transmitting){
+        //Serial.print(".");
+        if(now-transmissionTimer > 500){
+          endHermesTransmission();
+        }
       }
-    }
+    #else
+      if(lastTransmissionCompleted==0){
+        lastTransmissionCompleted = millis();
+        Serial.println("\r\n====\r\nRunning the Raw Sample Test.\r\nThis is a single shot running through a built in array of raw audio data.\r\n======");
+        sendTestHermesAudioFrameBySamplingRawAudio(512,false);
+      }
+    #endif
   #endif
 }
