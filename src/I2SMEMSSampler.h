@@ -18,4 +18,6 @@ public:
         i2s_config_t i2s_config,
         bool fixSPH0645 = false);
     virtual int read(int16_t *samples, int count);
+    //SEF add
+    void showMe();
 };

@@ -1,6 +1,7 @@
 #include "I2SMEMSSampler.h"
 #include "soc/i2s_reg.h"
 #include <algorithm>
+#include <Arduino.h>
 
 I2SMEMSSampler::I2SMEMSSampler(
     i2s_port_t i2s_port,
@@ -26,6 +27,12 @@ void I2SMEMSSampler::configureI2S()
 
 int I2SMEMSSampler::read(int16_t *samples, int count)
 {
+    //SEF notes==================
+    // This function takes a count sized array of uint_16 and draws raw_samples (32 bit) in chunks of upto 256.
+    // It bitshifts the 32 bit to the right to reduce the sound amplitude; and then stores the 32 bit number in a 
+    // 16bit array.
+    //===========================
+
     int32_t raw_samples[256];
     int sample_index = 0;
     while (count > 0)
@@ -36,11 +43,23 @@ int I2SMEMSSampler::read(int16_t *samples, int count)
         for (int i = 0; i < samples_read; i++)
         {
 
+            //Note: we read in a 32 bit (signed) number.  So this shifts everything right (dropping off the least 
+            // significant numbers) by 10 binary digits.  Has the effect of reducing the gain since the MSBs will be zero.
+            // Then the 
             //samples[sample_index] = (raw_samples[i] & 0xFFFFFFF0) >> 11;
             //TODO - work on gain control for mic.  For now a 10 bit shift seems enough; but clips loud sounds.
+
             samples[sample_index] = raw_samples[i]  >> 10;
             sample_index++;
             count--;
+            
+            //This is test code to see what this does to each sample=====
+            if(countOneTime < 20){
+                countOneTime++;
+                Serial.printf("%d) raw:%ld, shifted_raw:%ld, sample:%d.\r\n",countOneTime, raw_samples[i],raw_samples[i]>>10,samples[sample_index-1]);
+            } 
+            //============================================================
+            
         }
     }
     return sample_index;

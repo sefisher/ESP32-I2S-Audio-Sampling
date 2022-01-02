@@ -26,4 +26,6 @@ public:
     {
         return m_i2s_config.sample_rate;
     }
+    //SEF add - allows showing 20 samples being shifted and stored. 
+    int countOneTime = 20;
 };
