@@ -17,10 +17,10 @@
 //1. Make sure your WiFi credentials (& MQTT credentials if using HERMES) are stored in "secrets.h"
 //2. Uncomment *ONE* OF THE "#define USE_" STATEMENTS TO PICK AN AUDIO TRANSPORT OPTION
 //3. Enter the other related data for that type
-#define USE_UDP   //1. clientless UDP capture using "nc -lu -p 12333 | aplay -f S16_LE -r 16000"
+//#define USE_UDP   //1. clientless UDP capture using "nc -lu -p 12333 | aplay -f S16_LE -r 16000"
 //#define USE_TCP   //2. capture at TCP receiver using "nc -l -p 12333 | aplay -f S16_LE -r 16000"
 //#define USE_HTTP  //3. capture raw files at using "yarn start" on a node server (see below)
-//#define USE_HERMES  //4. This posts audio and other commands to MQTT. See below.
+#define USE_HERMES  //4. This posts audio and other commands to MQTT. See below.
 
 //===SETUP WIFI and TRANSPORT SPECIFICS===
 
@@ -223,7 +223,9 @@ i2s_pin_config_t i2sPins = {
     }else{
       Serial.println("Failed to increase the MQTT message buffer (tried to make it 4500.)");
     }
-    mqttAudioClient.publish("hermes/audioServer/default/connected", clientID);
+    
+    //TESTING - commented out connected frame
+    //mqttAudioClient.publish("hermes/audioServer/default/connected", clientID);
   //=======================================
   #endif
 
@@ -269,7 +271,8 @@ i2s_pin_config_t i2sPins = {
   #ifdef PUBSUBMQTT
     if (mqttAudioClient.connect(SITEID, MQTTUSER, MQTTPASS)) {
       Serial.println(" mqttAudioClient-->reconnected.");
-      mqttAudioClient.publish("hermes/audioServer/default/connected","Hello - reconnected.");
+      //TESTING - commented out connected frame
+      //mqttAudioClient.publish("hermes/audioServer/default/connected","Hello - reconnected.");
     }
     return mqttAudioClient.connected();
   #endif
@@ -312,7 +315,7 @@ i2s_pin_config_t i2sPins = {
     asyncMQTTclient.publish(topic, 0, false, startHeader.c_str());
     #endif
   }
-  //tell Rhasspy the sessiont is over and to stop listening (turns off active speech recoqnition module)
+  //tell Rhasspy the session is over and to stop listening (turns off active speech recoqnition module)
   void endHermesTransmission(){
     completedAudioTransmission = true;
     transmitting=false;
@@ -320,7 +323,8 @@ i2s_pin_config_t i2sPins = {
     String endHeader = String("{\"siteId\": \"default\",\"sessionId\": \"") + String(sessionID) + String("\"}");
     const char topic[] = "hermes/asr/stopListening";
     #ifdef PUBSUBMQTT
-    mqttAudioClient.publish(topic, endHeader.c_str(),sizeof(endHeader.c_str()));
+    //TESTING - commented out stoplistening  frame
+    //mqttAudioClient.publish(topic, endHeader.c_str(),sizeof(endHeader.c_str()));
     #endif
     #ifdef ASYNCMQTT
     asyncMQTTclient.publish(topic, 0, false, endHeader.c_str());
@@ -336,9 +340,11 @@ i2s_pin_config_t i2sPins = {
   #ifdef USE8BIT
   void sendHermesAudioFrameNew(const uint16_t *samples,int samples_read){
     bool use8bit = true;
+    const uint16_t *currentPtr;
   #else
   void sendHermesAudioFrameNew(const int16_t *samples,int samples_read){
     bool use8bit = false;
+    const int16_t *currentPtr;
   #endif
     
     if(firstaudiosessionframe==true){
@@ -362,7 +368,8 @@ i2s_pin_config_t i2sPins = {
     //Prepare wave file format header variables
     unsigned long x; //part size to convert to byte array
     uint8_t *headerArrayPtr;
-    const uint16_t *currentPtr;
+    
+ 
 
     //GET THE STUB WAVE HEADER FOR FORMAT IN USE
     if(use8bit){
@@ -370,10 +377,14 @@ i2s_pin_config_t i2sPins = {
     }else{
       headerArrayPtr = waveheader16;
     }
-    //waveheaderXX[4-7] needs to be updated to be (uint32_t)((samples_read*sizeof(uint8_t)))/sizeof(uint16_t) + 36);
+    //waveheaderXX[4-7] needs to be updated to be (uint32_t)((samples_read*sizeof(uint8_t)))/sizeof(uint16_t) + 44);
     //TODO - test this with the USE8BIT undefined (try for 16Bit)
-    //x=((samples_read*sizeof(uint8_t)) / sizeof(uint16_t) + 36);
-    x=((samples_read*sizeof(uint16_t)) / sizeof(uint16_t) + 36);
+    //x=((samples_read*sizeof(uint8_t)) / sizeof(uint16_t) + 44);
+    x=((samples_read*sizeof(uint16_t)) / sizeof(uint16_t) + 44);
+
+    //TESTING - copy from sattelite
+    //x=556;
+
     headerArrayPtr[7] = static_cast<unsigned char>((x & 0xFF000000) >> 24);
     headerArrayPtr[6] = static_cast<unsigned char>((x & 0x00FF0000) >> 16);
     headerArrayPtr[5] = static_cast<unsigned char>((x & 0x0000FF00) >> 8); 
@@ -382,7 +393,11 @@ i2s_pin_config_t i2sPins = {
     if(printDebug){Serial.println("\r\nFile size calc:");printHexArray(&headerArrayPtr[4],4);}
     
     //waveheaderXX[40-43] needs to be updated to be (uint32_t)((samples_read*sizeof(uint8_t))/sizeof(uint16_t))
-    x=(x-36);
+    x=(x-44);
+
+//TESTING - copy from sattelite
+//    x=512;
+    
     headerArrayPtr[43] = static_cast<unsigned char>((x & 0xFF000000) >> 24);
     headerArrayPtr[42] = static_cast<unsigned char>((x & 0x00FF0000) >> 16);  
     headerArrayPtr[41] = static_cast<unsigned char>((x & 0x0000FF00) >> 8);   
@@ -392,7 +407,7 @@ i2s_pin_config_t i2sPins = {
       //printHexArray(&headerArrayPtr[40],4);
       Serial.println("\r\nPrinting Wave Header:");
       printHexArray(headerArrayPtr,44);
-      Serial.printf("\r\nPreps completed. File length calc: %lu (%04x). Data section length calc: %lu (%04x).\r\n",x+36,x+36,x,x);
+      Serial.printf("\r\nPreps completed. File length calc: %lu (%04x). Data section length calc: %lu (%04x).\r\n",x+44,x+44,x,x);
       Serial.printf("\r\n========sendHermesAudioFrame=========\r\n");
       Serial.printf("USE8BIT=%d; MAXCHUNKSIZE=%d; \r\nsamples_read=%d; \r\n", use8bit,MAXCHUNKSIZE,samples_read);
     }
@@ -418,7 +433,12 @@ i2s_pin_config_t i2sPins = {
     }
 
     //set the topic
+    
+   
     audioFrameTopic = String("hermes/audioServer/default/") + String(sessionID) + String("/audioSessionFrame");
+ 
+ //TESTING - REPLACE THE ABOVE FRAME TOPIC:
+    audioFrameTopic = String("hermes/audioServer/default/audioFrame");
 
     //Publish the message binary
     mqttAudioClient.publish(audioFrameTopic.c_str(),(const uint8_t *)audioChunk, (unsigned int)(sizeof(uint8_t)*(44+samples_read)));
@@ -468,7 +488,7 @@ i2s_pin_config_t i2sPins = {
       headerArrayPtr = waveheader16;
     }
     //waveheaderXX[4-7] needs to be updated to be (uint32_t)((waveChunkSize*sizeof(uint8_t)))/sizeof(uint16_t) + 36);
-    x=( (waveChunkSize*sizeof(uint8_t)) / sizeof(uint16_t) + 36);
+    x=( (waveChunkSize*sizeof(uint8_t)) / sizeof(uint16_t) + 44);
     headerArrayPtr[7] = static_cast<unsigned char>((x & 0xFF000000) >> 24);
     headerArrayPtr[6] = static_cast<unsigned char>((x & 0x00FF0000) >> 16);
     headerArrayPtr[5] = static_cast<unsigned char>((x & 0x0000FF00) >> 8); 
@@ -477,7 +497,7 @@ i2s_pin_config_t i2sPins = {
     printHexArray(&headerArrayPtr[4],4); 
     
     //waveheaderXX[40-43] needs to be updated to be (uint32_t)((waveChunkSize*sizeof(uint8_t))/sizeof(uint16_t))
-    x=(x-36);
+    x=(x-44);
     headerArrayPtr[43] = static_cast<unsigned char>((x & 0xFF000000) >> 24);
     headerArrayPtr[42] = static_cast<unsigned char>((x & 0x00FF0000) >> 16);  
     headerArrayPtr[41] = static_cast<unsigned char>((x & 0x0000FF00) >> 8);   
@@ -668,9 +688,9 @@ void i2sMemsWriterTask(void *param)
       if(samples_read&&transmitting){
         #ifndef RAWSAMPLETEST
           #ifdef USE8BIT 
-          sendHermesAudioFrameNew((const uint16_t *)samples, samples_read);
+          sendHermesAudioFrameNew((const uint16_t *)samples, samples_read * sizeof(uint16_t));
           #else
-          sendHermesAudioFrameNew((const int16_t *)samples, samples_read);
+          sendHermesAudioFrameNew((const int16_t *)samples, samples_read * sizeof(int16_t));
           #endif
         #endif
       } 

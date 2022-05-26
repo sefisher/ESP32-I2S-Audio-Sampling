@@ -4,8 +4,8 @@
 #define SITEID "default"
 
 //SELECT THE rawData Array to use and the formatting for streaming audio by HERMES
-#define USE8BIT
-#define USE8BIT_ALT //pick a back up file
+//#define USE8BIT
+//#define USE8BIT_ALT //pick a back up file
 //#define USE16BIT
 
 struct wavfile_header {
